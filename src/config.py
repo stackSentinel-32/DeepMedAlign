@@ -21,19 +21,25 @@ FIXED_SHAPE = (192, 192, 192)
 HU_CLIP_RANGE = (-1024, 3071)
 
 
-for directory in (
-    DATA,
-    RAW,
-    PROCESSED,
-    SYNTHRAD,
-    MODELS,
-    RESULTS,
-    FIGURES,
-    LOGS,
-    DOCS,
-    PAPER_NOTES,
-    CONFIGS,
-    SCRIPTS,
-    TESTS,
-):
-    directory.mkdir(parents=True, exist_ok=True)
+def ensure_project_dirs():
+    """Create project directories. Call this from setup/CLI entrypoints.
+
+    This is intentionally not executed at import time to avoid surprising
+    side-effects for consumers that merely import `src.config`.
+    """
+    for directory in (
+        DATA,
+        RAW,
+        PROCESSED,
+        SYNTHRAD,
+        MODELS,
+        RESULTS,
+        FIGURES,
+        LOGS,
+        DOCS,
+        PAPER_NOTES,
+        CONFIGS,
+        SCRIPTS,
+        TESTS,
+    ):
+        directory.mkdir(parents=True, exist_ok=True)

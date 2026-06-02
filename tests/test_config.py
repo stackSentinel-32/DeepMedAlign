@@ -18,7 +18,12 @@ from src.config import (
     SYNTHRAD,
     TESTS,
     VOXEL_SPACING,
+    ensure_project_dirs,
 )
+
+
+# Ensure directories exist for tests; directory creation is explicit now
+ensure_project_dirs()
 
 
 def test_all_dirs_created():

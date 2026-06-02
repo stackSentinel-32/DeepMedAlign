@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "==> Creating conda environment: deepmedalign"
-conda env create -f environment.yml
+echo "==> Creating/updating conda environment: deepmedalign"
+conda env create -f environment.yml || conda env update -f environment.yml --prune
 
 echo "==> Activating environment"
 source "$(conda info --base)/etc/profile.d/conda.sh"

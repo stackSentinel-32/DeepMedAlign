@@ -18,14 +18,18 @@ def get_logger(name: str, level: int = logging.INFO) -> logging.Logger:
             )
         )
         logger.addHandler(handler)
-    logger.setLevel(level)
+        logger.propagate = False
+        logger.setLevel(level)
     return logger
 
 
 def ensure_file(path) -> Path:
-    """Raise FileNotFoundError with a clear message if the file is missing."""
+    """Raise FileNotFoundError with a clear message if the file is missing.
+
+    Ensures the path exists and is a regular file (not a directory).
+    """
     file_path = Path(path)
-    if not file_path.exists():
+    if not file_path.is_file():
         raise FileNotFoundError(f"Expected file not found: {file_path}")
     return file_path
 
