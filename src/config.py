@@ -1,45 +1,43 @@
-from pathlib import Path
+﻿from pathlib import Path
 
+# Root paths
+ROOT        = Path(__file__).parent.parent
+DATA_RAW    = ROOT / "data" / "raw"
+DATA_PROC   = ROOT / "data" / "processed"
+MODELS_DIR  = ROOT / "models"
+RESULTS     = ROOT / "results"
+LOGS        = ROOT / "logs"
+DOCS        = ROOT / "docs"
+SCRIPTS     = ROOT / "scripts"
 
-ROOT = Path(__file__).resolve().parent.parent
-DATA = ROOT / "data"
-RAW = DATA / "raw"
-PROCESSED = DATA / "processed"
-SYNTHRAD = RAW / "synthrad"
-MODELS = ROOT / "models"
-RESULTS = ROOT / "results"
-FIGURES = RESULTS / "figures"
-LOGS = ROOT / "logs"
-DOCS = ROOT / "docs"
-PAPER_NOTES = ROOT / "paper_notes"
-CONFIGS = ROOT / "configs"
-SCRIPTS = ROOT / "scripts"
-TESTS = ROOT / "tests"
+# Dataset paths
+SYNTHRAD    = DATA_RAW / "synthrad" / "brain"
+MANIFEST    = DATA_RAW / "manifest.csv"
+MANIFEST_V2 = DATA_RAW / "manifest_v2.csv"
+MANIFEST_P  = DATA_RAW / "manifest_processed.csv"
+MANIFEST_F  = DATA_RAW / "manifest_final.csv"
+SHAPE_RPT   = DATA_RAW / "shape_report.csv"
 
-VOXEL_SPACING = (1.0, 1.0, 1.0)
-FIXED_SHAPE = (192, 192, 192)
-HU_CLIP_RANGE = (-1024, 3071)
+# Preprocessing constants
+VOXEL_SPACING   = (1.0, 1.0, 1.0)
+FIXED_SHAPE     = (160, 192, 160)
+CT_HU_CLIP      = (-1000.0, 1000.0)
+CT_HU_BRAIN     = (-15.0, 80.0)
 
+# Training defaults
+LR              = 1e-4
+EPOCHS          = 1500
+BATCH_SIZE      = 1
+LAMBDA_SMOOTH   = 1.0
+LAMBDA_MI       = 1.0
 
-def ensure_project_dirs():
-    """Create project directories. Call this from setup/CLI entrypoints.
+# Splits
+RANDOM_SEED     = 42
+TRAIN_FRAC      = 0.70
+VAL_FRAC        = 0.10
+TEST_FRAC       = 0.20
 
-    This is intentionally not executed at import time to avoid surprising
-    side-effects for consumers that merely import `src.config`.
-    """
-    for directory in (
-        DATA,
-        RAW,
-        PROCESSED,
-        SYNTHRAD,
-        MODELS,
-        RESULTS,
-        FIGURES,
-        LOGS,
-        DOCS,
-        PAPER_NOTES,
-        CONFIGS,
-        SCRIPTS,
-        TESTS,
-    ):
-        directory.mkdir(parents=True, exist_ok=True)
+# Auto-create all output dirs on import
+for _d in [DATA_RAW, DATA_PROC, MODELS_DIR, RESULTS, LOGS, DOCS,
+           RESULTS / "figures"]:
+    _d.mkdir(parents=True, exist_ok=True)
