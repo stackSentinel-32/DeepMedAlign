@@ -18,4 +18,5 @@ models/*
 !data/raw/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
+data 
 *.egg-info/
