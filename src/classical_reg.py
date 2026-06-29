@@ -225,6 +225,8 @@ def register_affine(
 
     # Copy rigid parameters into an AffineTransform
     affine = sitk.AffineTransform(3)
+    if isinstance(rigid_tx, sitk.CompositeTransform):
+        rigid_tx = sitk.Euler3DTransform(rigid_tx.GetNthTransform(0))
     affine.SetMatrix(rigid_tx.GetMatrix())
     affine.SetTranslation(rigid_tx.GetTranslation())
     affine.SetFixedParameters(rigid_tx.GetFixedParameters())
