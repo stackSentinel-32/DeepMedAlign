@@ -79,11 +79,27 @@ def hausdorff95(
     if a.sum() == 0 or b.sum() == 0:
         return float("inf")
 
-    dist_to_b = distance_transform_edt(~b) * voxel_size
-    dist_to_a = distance_transform_edt(~a) * voxel_size
+    # Crop to bounding box of union to accelerate distance transform
+    coords = np.argwhere(a | b)
+    z_min, y_min, x_min = coords.min(axis=0)
+    z_max, y_max, x_max = coords.max(axis=0)
+    
+    pad = 5
+    z_min = max(0, z_min - pad)
+    y_min = max(0, y_min - pad)
+    x_min = max(0, x_min - pad)
+    z_max = min(a.shape[0], z_max + pad + 1)
+    y_max = min(a.shape[1], y_max + pad + 1)
+    x_max = min(a.shape[2], x_max + pad + 1)
 
-    h_a_to_b = np.percentile(dist_to_b[a], 95)
-    h_b_to_a = np.percentile(dist_to_a[b], 95)
+    a_crop = a[z_min:z_max, y_min:y_max, x_min:x_max]
+    b_crop = b[z_min:z_max, y_min:y_max, x_min:x_max]
+
+    dist_to_b = distance_transform_edt(~b_crop) * voxel_size
+    dist_to_a = distance_transform_edt(~a_crop) * voxel_size
+
+    h_a_to_b = np.percentile(dist_to_b[a_crop], 95)
+    h_b_to_a = np.percentile(dist_to_a[b_crop], 95)
 
     return float(max(h_a_to_b, h_b_to_a))
 
@@ -211,7 +227,22 @@ def compute_all_metrics(
     # --- Dice + HD95 (need CT mask warped into MR space) ---
     if ct_mask_path and os.path.exists(ct_mask_path):
         try:
-            ct_mask = nib.load(ct_mask_path).get_fdata().astype(bool)
+            import SimpleITK as sitk
+            tx_path = ct_warped_path.replace(f"_ct_{method}.nii.gz", f"_{method}.tfm")
+            if os.path.exists(tx_path):
+                fixed_mask_sitk = sitk.ReadImage(mr_mask_path)
+                moving_mask_sitk = sitk.ReadImage(ct_mask_path)
+                tx = sitk.ReadTransform(tx_path)
+                warped_mask_sitk = sitk.Resample(
+                    moving_mask_sitk, fixed_mask_sitk, tx,
+                    sitk.sitkNearestNeighbor,
+                    0.0,
+                    moving_mask_sitk.GetPixelID()
+                )
+                ct_mask = sitk.GetArrayFromImage(warped_mask_sitk).astype(bool)
+            else:
+                ct_mask = nib.load(ct_mask_path).get_fdata().astype(bool)
+            
             result["dice"] = round(dice_coefficient(mr_mask, ct_mask), 4)
             result["hd95"] = round(hausdorff95(mr_mask, ct_mask, voxel_size=1.0), 3)
         except Exception as exc:
