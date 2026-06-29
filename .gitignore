@@ -15,8 +15,12 @@ results/figures/*
 !results/figures/.gitkeep
 models/*
 !models/.gitkeep
+data/*
+!data/raw/
+data/raw/*
 !data/raw/.gitkeep
+!data/raw/*.csv
+!data/processed/
 data/processed/*
 !data/processed/.gitkeep
-data 
 *.egg-info/
