@@ -10,8 +10,20 @@ Medical imaging generates two fundamentally different views of the same patient:
 
 Takes a patient's CT scan and warps it to match their MRI — millimetre by millimetre — so both scans occupy the same coordinate space and can be overlaid perfectly.
 
-```
-Raw CT (misaligned)  →  Rigid  →  Affine  →  B-spline  →  Registered CT ✅
+```mermaid
+flowchart LR
+    A["🏥 Raw Patient Scan\n(CT + MRI)"] --> B["🔧 Preprocessing\nNormalise · Skull-strip · Resample to 1mm"]
+    B --> C["📐 Rigid Registration\nRotate + Translate\n~3 sec"]
+    C --> D["📏 Affine Registration\nScale + Shear\n~3 sec"]
+    D --> E["〰️ B-spline Registration\nLocal pixel-level warp\n~3 min"]
+    E --> F["✅ Registered CT\nPerfectly overlaid\non MRI space"]
+
+    style A fill:#1e3a5f,color:#fff,stroke:#4a90d9
+    style B fill:#1e3a5f,color:#fff,stroke:#4a90d9
+    style C fill:#2d5016,color:#fff,stroke:#6abf40
+    style D fill:#2d5016,color:#fff,stroke:#6abf40
+    style E fill:#2d5016,color:#fff,stroke:#6abf40
+    style F fill:#5a1a1a,color:#fff,stroke:#e05252
 ```
 
 ---
@@ -68,7 +80,31 @@ python scripts\compute_baseline_metrics.py --method bspline --split train
 | R4 — Research Docs | `r4/research-docs` | 🔲 Upcoming |
 | Week 3 — VoxelMorph (Deep Learning) | `r2/week3-voxelmorph` | 🔲 Upcoming |
 
+```mermaid
+flowchart TD
+    R1["✅ R1 · Data Pipeline\nDownload · Preprocess · Split\n180 brain scans ready"]
+    R2["✅ R2 · Classical Registration\nRigid → Affine → B-spline\nBaseline: Dice=0.776, HD95=19.2mm"]
+    R3["✅ R3 · Visualisation\nOverlay checks · QC plots"]
+    W3["🔲 Week 3 · VoxelMorph\nTrain neural net to replace\nB-spline in milliseconds"]
+    R4["🔲 R4 · Research Docs\nPaper · Analysis · Report"]
+    GOAL["🏆 Goal\nDice > 0.776\nHD95 < 19.2 mm\nat inference speed"]
+
+    R1 --> R2
+    R2 --> R3
+    R3 --> W3
+    W3 --> R4
+    W3 --> GOAL
+
+    style R1 fill:#1a3a1a,color:#7fff7f,stroke:#4caf50
+    style R2 fill:#1a3a1a,color:#7fff7f,stroke:#4caf50
+    style R3 fill:#1a3a1a,color:#7fff7f,stroke:#4caf50
+    style W3 fill:#2a2a1a,color:#ffff7f,stroke:#cddc39
+    style R4 fill:#2a2a1a,color:#ffff7f,stroke:#cddc39
+    style GOAL fill:#3a1a1a,color:#ff9f9f,stroke:#f44336
+```
+
 ---
+
 
 ## 🏗️ Project Structure
 
