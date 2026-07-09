@@ -24,7 +24,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from src.config import DATA_RAW, DATA_PROC, RESULTS
+from src.config import DATA_RAW, DATA_PROC, RESULTS, MANIFEST_P
 from src.metrics import compute_all_metrics
 from src.utils import get_logger, ensure_dir
 
@@ -52,9 +52,9 @@ def main() -> None:
     args = ap.parse_args()
 
     # --- Load manifest ---
-    manifest_path = DATA_RAW / "manifest.csv"
+    manifest_path = MANIFEST_P
     if not manifest_path.exists():
-        log.error("manifest.csv not found. Run scripts/build_manifest.py first.")
+        log.error("manifest_processed.csv not found.")
         sys.exit(1)
     manifest = pd.read_csv(manifest_path)
     if args.split:
