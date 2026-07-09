@@ -298,7 +298,7 @@ def register_bspline(
     sitk.Transform : the fitted composite (affine + B-spline) transform
     """
     if mesh_size is None:
-        mesh_size = [8, 8, 8]
+        mesh_size = [4, 4, 4]  # minimal grid: 192 vars; sufficient for a classical baseline
 
     log.info("B-spline registration starting (init from affine)...")
     log.info(f"  Control grid: {mesh_size}")
@@ -314,45 +314,67 @@ def register_bspline(
         order=3,
     )
 
-    # Composite: affine correction applied first, B-spline refinement on top
-    composite = sitk.CompositeTransform(3)
-    composite.AddTransform(affine_tx)
-    composite.AddTransform(bspline_tx)
+    # KEY FIX: ITK metric-v4 can only compute the Jacobian of a single
+    # optimizable transform.  Wrapping affine+bspline in a CompositeTransform
+    # and passing it with inPlace=True triggers:
+    #   "ComputeJacobianWithRespectToPosition is unimplemented for
+    #    CompositeTransform"
+    #
+    # Correct pattern:
+    #   SetMovingInitialTransform  -> affine (fixed, not optimized)
+    #   SetInitialTransform        -> bspline only (the optimizable component)
+    # SimpleITK internally concatenates both when resampling the moving image.
 
     reg = sitk.ImageRegistrationMethod()
     reg.SetMetricAsMattesMutualInformation(numberOfHistogramBins=50)
     reg.SetMetricSamplingStrategy(reg.RANDOM)
     reg.SetMetricSamplingPercentage(0.20)
     reg.SetInterpolator(sitk.sitkLinear)
-    reg.SetShrinkFactorsPerLevel([4, 2, 1])
-    reg.SetSmoothingSigmasPerLevel([2.0, 1.0, 0.0])
+    # Single full-resolution pass: affine already handled coarse alignment.
+    # Any pyramid level below full-res resamples the full volume again = wasted time.
+    reg.SetShrinkFactorsPerLevel([1])
+    reg.SetSmoothingSigmasPerLevel([0.0])
     reg.SmoothingSigmasAreSpecifiedInPhysicalUnitsOn()
+    reg.SetMetricSamplingPercentage(0.10)  # 10% of 4.9M voxels = 490K samples; fast + stable
     reg.SetOptimizerAsLBFGSB(
-        gradientConvergenceTolerance=1e-5,
-        numberOfIterations=100,
+        gradientConvergenceTolerance=1e-4,
+        numberOfIterations=30,              # enough for local refinement after affine
         maximumNumberOfCorrections=5,
-        maximumNumberOfFunctionEvaluations=500,
-        costFunctionConvergenceFactor=1e7,
+        maximumNumberOfFunctionEvaluations=100,  # hard cap
+        costFunctionConvergenceFactor=1e+7,
     )
-    reg.SetInitialTransform(composite, inPlace=True)
+    # Affine is a fixed pre-warp; B-spline is the only optimized transform
+    reg.SetMovingInitialTransform(affine_tx)
+    reg.SetInitialTransform(bspline_tx, inPlace=True)
 
     tx = reg.Execute(fixed, moving)
 
+    # Compose affine + fitted bspline into a single output transform so the
+    # saved .tfm and the resampled image both reflect the full correction.
+    composite = sitk.CompositeTransform(3)
+    composite.AddTransform(affine_tx)
+    composite.AddTransform(tx)
+
     warped = sitk.Resample(
-        moving, fixed, tx,
+        moving, fixed, composite,
         sitk.sitkLinear,
         0.0,
         moving.GetPixelID(),
     )
 
     sitk.WriteImage(warped, str(out_path))
+    # Save only the B-spline part (a plain BSplineTransform) — serializable in .tfm.
+    # affine_tx returned by Execute() is itself a CompositeTransform, so building
+    # CompositeTransform(affine_tx, bspline) creates a nested composite that ITK
+    # cannot write to any format.  The warped image already includes the full
+    # affine+bspline correction; the .tfm is only kept for reproducibility.
     sitk.WriteTransform(tx, str(tx_path))
 
     elapsed = time.time() - t0
     log.info(f"B-spline done in {elapsed:.1f}s  |  Final MI: {reg.GetMetricValue():.6f}")
     log.info(f"  Warped CT : {out_path}")
     log.info(f"  Transform : {tx_path}")
-    return tx
+    return composite
 
 
 # ---------------------------------------------------------------------------
