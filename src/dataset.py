@@ -153,10 +153,13 @@ class MedicalRegistrationDataset(Dataset):
 
     @staticmethod
     def _load_npy(path: Optional[str],
-                  shape: tuple = FIXED_SHAPE) -> torch.Tensor:
+                  shape: tuple = FIXED_SHAPE,
+                  normalize: bool = False) -> torch.Tensor:
         """Load a .npy file and return a (1, D, H, W) float32 tensor.
 
         If path is None or missing, returns a zero tensor of the target shape.
+        If normalize=True, applies per-volume min-max normalization to [0, 1].
+        This is used for MR volumes whose .npy files may contain z-score values.
         """
         if path and Path(path).exists():
             arr = np.load(path).astype("float32")
@@ -174,6 +177,14 @@ class MedicalRegistrationDataset(Dataset):
             out[:s[0], :s[1], :s[2]] = arr[:s[0], :s[1], :s[2]]
             arr = out
 
+        # Per-volume min-max normalization to [0, 1]
+        if normalize:
+            v_min, v_max = arr.min(), arr.max()
+            if v_max > v_min:
+                arr = (arr - v_min) / (v_max - v_min)
+            else:
+                arr = np.zeros_like(arr)
+
         return torch.from_numpy(arr).unsqueeze(0)   # (1, D, H, W)
 
     # ── Dataset interface ────────────────────────────────────────────────────
@@ -186,9 +197,9 @@ class MedicalRegistrationDataset(Dataset):
 
         sample = {
             "subject_id": info["subject_id"],
-            "mr":         self._load_npy(info["mr_path"]),
-            "ct":         self._load_npy(info["ct_path"]),
-            "mask":       self._load_npy(info["mask_path"]),
+            "mr":         self._load_npy(info["mr_path"],   normalize=True),
+            "ct":         self._load_npy(info["ct_path"],   normalize=False),
+            "mask":       self._load_npy(info["mask_path"], normalize=False),
         }
 
         if self.transform is not None:
