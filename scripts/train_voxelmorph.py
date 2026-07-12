@@ -47,7 +47,7 @@ def get_device(requested: str = "auto") -> torch.device:
 
 def train_one_epoch(model, loader, optimizer, scaler, device, lambda_reg):
     model.train()
-    total = mind_sum = reg_sum = 0.0
+    total = mi_sum = reg_sum = 0.0
     n = 0
 
     for batch in loader:
@@ -68,21 +68,21 @@ def train_one_epoch(model, loader, optimizer, scaler, device, lambda_reg):
             optimizer.step()
 
         total    += losses["total"]
-        mind_sum += losses["mind"]
+        mi_sum   += losses["mi"]
         reg_sum  += losses["reg"]
         n        += 1
 
     return {
-        "train_loss": total    / max(n, 1),
-        "train_mind": mind_sum / max(n, 1),
-        "train_reg":  reg_sum  / max(n, 1),
+        "train_loss": total   / max(n, 1),
+        "train_mi":   mi_sum  / max(n, 1),
+        "train_reg":  reg_sum / max(n, 1),
     }
 
 
 @torch.no_grad()
 def validate(model, loader, device, lambda_reg):
     model.eval()
-    total = mind_sum = reg_sum = ncc_sum = 0.0
+    total = mi_sum = reg_sum = ncc_sum = 0.0
     n = 0
 
     for batch in loader:
@@ -93,23 +93,22 @@ def validate(model, loader, device, lambda_reg):
             warped_ct, dvf = model(mr, ct)
             loss, losses   = total_loss(warped_ct, mr, dvf, lambda_reg)
 
-        # NCC similarity between warped CT and MRI
         ncc_val = ncc(
             mr[0, 0].cpu().numpy(),
             warped_ct[0, 0].cpu().numpy(),
         )
 
-        total    += losses["total"]
-        mind_sum += losses["mind"]
-        reg_sum  += losses["reg"]
-        ncc_sum  += ncc_val
-        n        += 1
+        total   += losses["total"]
+        mi_sum  += losses["mi"]
+        reg_sum += losses["reg"]
+        ncc_sum += ncc_val
+        n       += 1
 
     return {
-        "val_loss": total    / max(n, 1),
-        "val_mind": mind_sum / max(n, 1),
-        "val_reg":  reg_sum  / max(n, 1),
-        "val_ncc":  ncc_sum  / max(n, 1),
+        "val_loss": total   / max(n, 1),
+        "val_mi":   mi_sum  / max(n, 1),
+        "val_reg":  reg_sum / max(n, 1),
+        "val_ncc":  ncc_sum / max(n, 1),
     }
 
 
@@ -134,7 +133,11 @@ def main():
                     help="Path to checkpoint to resume from")
     # Auto-detect best worker count: 4 on Linux (Kaggle), 0 on Windows
     default_workers = 4 if platform.system() == "Linux" else 0
-    ap.add_argument("--workers",    type=int, default=default_workers)
+    ap.add_argument("--workers",       type=int, default=default_workers)
+    ap.add_argument("--diffeomorphic", action="store_true",
+                    help="Use diffeomorphic (no-fold) integration in model")
+    ap.add_argument("--cosine",        action="store_true",
+                    help="Use CosineAnnealingWarmRestarts instead of ReduceLROnPlateau")
     args = ap.parse_args()
 
     device = get_device(args.device)
@@ -158,10 +161,17 @@ def main():
     log.info(f"DataLoader workers: {args.workers}")
 
     # ── Model ────────────────────────────────────────────────────────────────
-    model     = VoxelMorph().to(device)
+    model     = VoxelMorph(diffeomorphic=args.diffeomorphic).to(device)
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, patience=50, factor=0.5, min_lr=1e-6)
+
+    if args.cosine:
+        scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            optimizer, T_0=100, T_mult=2, eta_min=1e-6)
+        log.info("Scheduler: CosineAnnealingWarmRestarts (T_0=100, T_mult=2)")
+    else:
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, patience=50, factor=0.5, min_lr=1e-6)
+        log.info("Scheduler: ReduceLROnPlateau (patience=50, factor=0.5)")
 
     # ── AMP Scaler (GPU only) ─────────────────────────────────────────────────
     use_amp = (device.type == "cuda")
@@ -169,14 +179,14 @@ def main():
     log.info(f"AMP (Mixed Precision): {'ENABLED' if use_amp else 'disabled'}")
 
     # ── torch.compile (PyTorch 2.0+, best on Linux/Kaggle) ────────────────────
-    if hasattr(torch, "compile") and device.type == "cuda":
+    if hasattr(torch, "compile") and device.type == "cuda" and platform.system() == "Linux":
         try:
             model = torch.compile(model)
             log.info("torch.compile: ENABLED (15-30%% extra speedup)")
         except Exception as e:
             log.warning(f"torch.compile skipped: {e}")
     else:
-        log.info("torch.compile: skipped (CPU or older PyTorch)")
+        log.info("torch.compile: skipped (Windows / CPU / older PyTorch)")
 
     start_epoch = 0
     best_val    = float("inf")
@@ -198,8 +208,8 @@ def main():
     log_path  = str(RESULTS / "training_log.csv")
 
     # ── CSV log ──────────────────────────────────────────────────────────────
-    csv_fields   = ["epoch", "train_loss", "train_mind", "train_reg",
-                    "val_loss", "val_mind", "val_reg", "val_ncc", "lr"]
+    csv_fields   = ["epoch", "train_loss", "train_mi", "train_reg",
+                    "val_loss", "val_mi", "val_reg", "val_ncc", "lr"]
     write_header = not Path(log_path).exists()
     csv_file     = open(log_path, "a", newline="")
     writer       = csv.DictWriter(csv_file, fieldnames=csv_fields)
@@ -217,7 +227,10 @@ def main():
         val_logs   = validate(
             model, val_loader, device, args.lambda_reg)
 
-        scheduler.step(val_logs["val_loss"])
+        if args.cosine:
+            scheduler.step()
+        else:
+            scheduler.step(val_logs["val_loss"])
         cur_lr = optimizer.param_groups[0]["lr"]
 
         row = {
@@ -242,10 +255,10 @@ def main():
         elapsed = time.time() - t0
         print(
             f"Epoch {epoch:4d} | "
-            f"train={train_logs['train_loss']:.4f} "
-            f"(mind={train_logs['train_mind']:.4f} "
-            f"reg={train_logs['train_reg']:.4f}) | "
-            f"val={val_logs['val_loss']:.4f}  "
+            f"train={train_logs['train_loss']:.6f} "
+            f"(mi={train_logs['train_mi']:.6f} "
+            f"reg={train_logs['train_reg']:.6f}) | "
+            f"val={val_logs['val_loss']:.6f}  "
             f"ncc={val_logs['val_ncc']:.4f} | "
             f"{elapsed:.1f}s"
         )

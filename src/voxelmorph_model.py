@@ -1,31 +1,18 @@
 """
-voxelmorph_model.py
---------------------
-VoxelMorph-style U-Net for deformable MRI-CT registration.
+VoxelMorph U-Net with multi-resolution pyramid and optional diffeomorphic integration.
 
 Architecture
 ------------
-Encoder: 4 downsampling blocks (Conv3d + LeakyReLU)
-Decoder: 4 upsampling blocks (Upsample + Conv3d + skip connections)
-Head   : 1x1x1 Conv -> 3-channel DVF (displacement vector field)
-SpatialTransformer: warps CT using predicted DVF
-
-Input:  [MRI, CT] concatenated along channel dim -> (B, 2, D, H, W)
-Output: warped_ct (B, 1, D, H, W),  dvf (B, 3, D, H, W)
-
-Usage
------
-    model = VoxelMorph()
-    warped_ct, dvf = model(mr, ct)
+Encoder  : 4 downsampling ConvBlocks
+Decoder  : 4 upsampling blocks with skip connections
+DVF Head : Coarse DVF predicted at each decoder scale, accumulated (pyramid)
+Integrate: Optional VecInt (scaling-and-squaring) for fold-free deformations
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# ---------------------------------------------------------------------------
-# Building blocks
-# ---------------------------------------------------------------------------
 
 class ConvBlock(nn.Module):
     def __init__(self, in_ch, out_ch, stride=1):
@@ -43,138 +30,119 @@ class ConvBlock(nn.Module):
 class UpConvBlock(nn.Module):
     def __init__(self, in_ch, out_ch):
         super().__init__()
-        self.up   = nn.Upsample(scale_factor=2, mode='trilinear',
-                                 align_corners=False)
+        self.up   = nn.Upsample(scale_factor=2, mode='trilinear', align_corners=False)
         self.conv = ConvBlock(in_ch, out_ch)
 
     def forward(self, x, skip):
         x = self.up(x)
-        x = torch.cat([x, skip], dim=1)
-        return self.conv(x)
+        return self.conv(torch.cat([x, skip], dim=1))
 
-
-# ---------------------------------------------------------------------------
-# Spatial Transformer (differentiable warp)
-# ---------------------------------------------------------------------------
 
 class SpatialTransformer(nn.Module):
-    """Warp an image using a dense displacement vector field (DVF).
-
-    Parameters
-    ----------
-    size : (D, H, W) -- spatial dimensions of the volume
-    mode : interpolation mode ('bilinear' works for 3D in PyTorch)
-    """
+    """Differentiable warp using a dense DVF."""
 
     def __init__(self, size, mode='bilinear'):
         super().__init__()
         self.mode = mode
-
-        # Create base sampling grid (identity) and register as buffer
-        grid = self._identity_grid(size)
-        self.register_buffer('grid', grid)
-
-    @staticmethod
-    def _identity_grid(size):
         D, H, W  = size
         vectors  = [torch.arange(0, s) for s in (D, H, W)]
-        grids    = torch.meshgrid(vectors, indexing='ij')
-        grid     = torch.stack(grids)           # (3, D, H, W)
-        grid     = grid.unsqueeze(0).float()    # (1, 3, D, H, W)
-        return grid
+        grid     = torch.stack(torch.meshgrid(vectors, indexing='ij')).unsqueeze(0).float()
+        self.register_buffer('grid', grid)
 
     def forward(self, src, dvf):
-        # dvf: (B, 3, D, H, W) -- displacement in voxel units
         new_locs = self.grid + dvf
-
-        # Normalise to [-1, 1] for grid_sample
         shape = dvf.shape[2:]
         for i, s in enumerate(shape):
             new_locs[:, i] = 2 * (new_locs[:, i] / (s - 1) - 0.5)
-
-        # grid_sample expects (B, D, H, W, 3)
-        new_locs = new_locs.permute(0, 2, 3, 4, 1)
-        new_locs = new_locs[..., [2, 1, 0]]    # XYZ order
-
+        new_locs = new_locs.permute(0, 2, 3, 4, 1)[..., [2, 1, 0]]
         return F.grid_sample(src, new_locs, mode=self.mode,
-                             align_corners=True,
-                             padding_mode='border')
+                             align_corners=True, padding_mode='border')
 
 
-# ---------------------------------------------------------------------------
-# VoxelMorph U-Net
-# ---------------------------------------------------------------------------
+class VecInt(nn.Module):
+    """Scaling-and-squaring integrator for diffeomorphic (fold-free) DVF."""
+
+    def __init__(self, size, steps=7):
+        super().__init__()
+        self.steps       = steps
+        self.scale       = 1.0 / (2 ** steps)
+        self.transformer = SpatialTransformer(size)
+
+    def forward(self, svf):
+        flow = svf * self.scale
+        for _ in range(self.steps):
+            flow = flow + self.transformer(flow, flow)
+        return flow
+
 
 class VoxelMorph(nn.Module):
-    """U-Net based deformable registration network.
+    """Multi-resolution pyramid VoxelMorph.
+
+    DVF is predicted at three decoder scales and accumulated, giving the
+    network explicit coarse-to-fine supervision over the alignment.
 
     Parameters
     ----------
-    in_ch        : input channels per modality (1 MR + 1 CT = 2)
-    enc_features : channels in each encoder stage
-    dec_features : channels in each decoder stage
-    vol_size     : (D, H, W) for SpatialTransformer
+    diffeomorphic : integrate velocity field for fold-free deformation
     """
 
     def __init__(
         self,
-        in_ch        = 2,
-        enc_features = (16, 32, 32, 32),
-        dec_features = (32, 32, 32, 32, 16),
-        vol_size     = (160, 192, 160),
+        in_ch         = 2,
+        enc_features  = (16, 32, 32, 32),
+        dec_features  = (32, 32, 32, 16),
+        vol_size      = (160, 192, 160),
+        diffeomorphic = False,
     ):
         super().__init__()
 
-        # ── Encoder ──────────────────────────────────────────────────────────
+        # Encoder
         self.enc1 = ConvBlock(in_ch,           enc_features[0], stride=1)
         self.enc2 = ConvBlock(enc_features[0], enc_features[1], stride=2)
         self.enc3 = ConvBlock(enc_features[1], enc_features[2], stride=2)
         self.enc4 = ConvBlock(enc_features[2], enc_features[3], stride=2)
 
-        # ── Decoder ──────────────────────────────────────────────────────────
-        self.dec1 = UpConvBlock(enc_features[3] + enc_features[2],
-                                dec_features[0])
-        self.dec2 = UpConvBlock(dec_features[0] + enc_features[1],
-                                dec_features[1])
-        self.dec3 = UpConvBlock(dec_features[1] + enc_features[0],
-                                dec_features[2])
+        # Decoder
+        self.dec1 = UpConvBlock(enc_features[3] + enc_features[2], dec_features[0])
+        self.dec2 = UpConvBlock(dec_features[0] + enc_features[1], dec_features[1])
+        self.dec3 = UpConvBlock(dec_features[1] + enc_features[0], dec_features[2])
 
-        # ── DVF head ─────────────────────────────────────────────────────────
-        self.dvf_head = nn.Conv3d(dec_features[2], 3,
-                                  kernel_size=3, padding=1)
-        nn.init.zeros_(self.dvf_head.weight)
-        nn.init.zeros_(self.dvf_head.bias)
+        # Multi-resolution DVF heads (coarse → fine pyramid)
+        self.dvf_head1 = nn.Conv3d(dec_features[0], 3, 3, padding=1)  # 1/4 res
+        self.dvf_head2 = nn.Conv3d(dec_features[1], 3, 3, padding=1)  # 1/2 res
+        self.dvf_head3 = nn.Conv3d(dec_features[2], 3, 3, padding=1)  # full res
 
-        # ── Spatial transformer ───────────────────────────────────────────────
+        for head in (self.dvf_head1, self.dvf_head2, self.dvf_head3):
+            nn.init.zeros_(head.weight)
+            nn.init.zeros_(head.bias)
+
+        # Diffeomorphic integrator
+        self.diffeomorphic = diffeomorphic
+        if diffeomorphic:
+            self.vec_int = VecInt(vol_size)
+
         self.spatial_transformer = SpatialTransformer(vol_size)
 
     def forward(self, mr, ct):
-        """
-        Parameters
-        ----------
-        mr : (B, 1, D, H, W)  -- fixed image (MRI)
-        ct : (B, 1, D, H, W)  -- moving image (CT)
+        x = torch.cat([mr, ct], dim=1)
 
-        Returns
-        -------
-        warped_ct : (B, 1, D, H, W) -- CT warped to MRI space
-        dvf       : (B, 3, D, H, W) -- displacement vector field
-        """
-        x = torch.cat([mr, ct], dim=1)   # (B, 2, D, H, W)
-
-        # Encode
         e1 = self.enc1(x)
         e2 = self.enc2(e1)
         e3 = self.enc3(e2)
         e4 = self.enc4(e3)
 
-        # Decode with skip connections
         d1 = self.dec1(e4, e3)
         d2 = self.dec2(d1, e2)
         d3 = self.dec3(d2, e1)
 
-        # DVF + warp
-        dvf       = self.dvf_head(d3)
-        warped_ct = self.spatial_transformer(ct, dvf)
+        # Pyramid: accumulate DVF from coarse to fine
+        dvf_coarse = self.dvf_head1(d1)
+        dvf_mid    = self.dvf_head2(d2) + F.interpolate(dvf_coarse, scale_factor=2, mode='trilinear', align_corners=False)
+        dvf_fine   = self.dvf_head3(d3) + F.interpolate(dvf_mid,    scale_factor=2, mode='trilinear', align_corners=False)
 
+        dvf = dvf_fine
+        if self.diffeomorphic:
+            dvf = self.vec_int(dvf)
+
+        warped_ct = self.spatial_transformer(ct, dvf)
         return warped_ct, dvf
