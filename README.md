@@ -247,6 +247,34 @@ We engineered a state-of-the-art **VoxelMorph** neural network tailored specific
 *   **Test-Time Adaptation (TTA):** The network dynamically fine-tunes its weights on unseen test patients during inference, maximizing patient-specific accuracy.
 *   **High-Performance Engineering:** Leveraged `torch.compile` and Automatic Mixed Precision (AMP) to train ~4.9 million voxels per scan in just 90 seconds per epoch on a Kaggle T4 GPU.
 
+```mermaid
+flowchart TD
+    START["🏎️ Performance Engineering\nHow we achieved high speed & accuracy"]
+    
+    subgraph Speed["⚡ Speed Optimisations (Timing)"]
+        S1["📦 NumPy Caching\nConverted NIfTI to .npy\nLoad time: 7 hrs ➔ 13 mins"]
+        S2["🖥️ Mixed Precision (AMP)\nFloat16 math for 2x faster GPU operations"]
+        S3["⚙️ torch.compile\nPyTorch 2.0 graph optimization\nEpoch time: ~90 seconds"]
+    end
+    
+    subgraph Acc["🎯 Accuracy Optimisations (Alignment)"]
+        A1["🧠 Mutual Information (MI) Loss\nBridged the gap between MRI (soft tissue) and CT (bone)"]
+        A2["📐 Multi-Res Pyramid\nCoarse-to-fine DVF alignment (1/4 → 1/2 → 1/1)"]
+        A3["〰️ Diffeomorphic Integration\nScaling-and-squaring for fold-free, reversible warps"]
+        A4["🔧 Test-Time Adaptation (TTA)\n30-step dynamic fine-tuning on unseen test patients"]
+    end
+
+    START --> Speed
+    START --> Acc
+    
+    S1 --> S2 --> S3
+    A1 --> A2 --> A3 --> A4
+    
+    style START fill:#3a1a1a,color:#ff9f9f,stroke:#f44336
+    style Speed fill:#1a2a3a,color:#7f9fff,stroke:#4c50af
+    style Acc fill:#1a3a1a,color:#7fff7f,stroke:#4caf50
+```
+
 ---
 
 ## 🤝 Contributing
