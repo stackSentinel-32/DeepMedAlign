@@ -109,7 +109,7 @@ python -m pytest tests\ -v
 | R1 Week 2 — NPY Cache + Manifests | `r1/week2-data-pipeline` | ✅ Done |
 | R2 — Classical Registration | `r2/week2-classical-registration` | ✅ Done |
 | R3 — Visualisation & QC | `r3/week2-visualization` | ✅ Done |
-| Week 3 — VoxelMorph (Deep Learning) | `r2/week3-voxelmorph` | 🔲 Upcoming |
+| Week 3 — VoxelMorph (Deep Learning) | `r2/week3-voxelmorph` | ✅ Done |
 | R4 — Research Docs & Final Report | `r4/research-docs` | 🔲 Upcoming |
 
 ```mermaid
@@ -118,7 +118,7 @@ flowchart TD
     R1W2["✅ R1 Week 2 · NPY Cache\nFast loader · Manifests\n180/180 ready in 0.01s"]
     R2["✅ R2 · Classical Registration\nRigid → Affine → B-spline\nDice=0.776, HD95=19.2mm"]
     R3["✅ R3 · Visualisation & QC\nCheckerboard overlays · Difference maps\nQC dashboard · 180 subjects verified"]
-    W3["🔲 Week 3 · VoxelMorph\nTrain neural net · Minimise NCC cost\nInference in milliseconds"]
+    W3["✅ Week 3 · VoxelMorph\nMI Loss · Multi-Res Pyramid · TTA\nInference in milliseconds"]
     R4["🔲 R4 · Research Docs\nPaper · Speed vs Accuracy analysis\nFinal report"]
     GOAL["🏆 Goal\nDice > 0.776\nHD95 < 19.2 mm\nat inference speed"]
 
@@ -133,7 +133,7 @@ flowchart TD
     style R1W2 fill:#1a3a1a,color:#7fff7f,stroke:#4caf50
     style R2 fill:#1a3a1a,color:#7fff7f,stroke:#4caf50
     style R3 fill:#1a3a1a,color:#7fff7f,stroke:#4caf50
-    style W3 fill:#2a2a1a,color:#ffff7f,stroke:#cddc39
+    style W3 fill:#1a3a1a,color:#7fff7f,stroke:#4caf50
     style R4 fill:#2a2a1a,color:#ffff7f,stroke:#cddc39
     style GOAL fill:#3a1a1a,color:#ff9f9f,stroke:#f44336
 ```
@@ -234,6 +234,18 @@ Where:
 - `P95` = 95th percentile (ignores the 5% worst outliers)
 - Unit: millimetres
 - **Goal:** HD95 < 19.2 mm (beat the B-spline baseline)
+
+---
+
+## 🧠 Deep Learning Architecture (Week 3)
+
+The **VoxelMorph** neural network was implemented with state-of-the-art enhancements for robust MRI-CT multimodal registration:
+
+1. **Mutual Information (MI) Loss:** Replaced standard MSE/MIND with a differentiable Parzen-window MI estimator, the gold standard for multimodal medical image registration.
+2. **Multi-Resolution DVF Pyramid:** The Deformation Vector Field (DVF) is accumulated coarse-to-fine across three decoder scales (1/4, 1/2, and full resolution) to align global structures before local details.
+3. **Diffeomorphic Integration:** Uses a scaling-and-squaring layer (7 steps) to guarantee a smooth, fold-free displacement field that preserves anatomical topology.
+4. **Test-Time Adaptation (TTA):** During inference, the network fine-tunes on each unseen test patient for 30 steps to maximize patient-specific accuracy.
+5. **High-Performance Training:** Leverages PyTorch `torch.compile` and Automatic Mixed Precision (AMP) to achieve ~90s epochs on a Kaggle T4 GPU.
 
 ---
 
