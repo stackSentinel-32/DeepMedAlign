@@ -24,3 +24,7 @@ data/raw/*
 data/processed/*
 !data/processed/.gitkeep
 *.egg-info/
+source-code
+source-code.zip
+deepmedalign-data-preprocessed
+deepmedalign-data-preprocessed.zip

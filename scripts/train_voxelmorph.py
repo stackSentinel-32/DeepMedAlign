@@ -5,8 +5,8 @@ Training loop for VoxelMorph MRI-CT deformable registration.
 
 What this script does:
   1. Loads train/val DataLoaders from R1's pipeline
-  2. Trains VoxelMorph for EPOCHS iterations
-  3. Logs MIND loss + reg loss + NCC every epoch
+  2. Trains VoxelMorph using Multi-Scale Deep Supervision (MIND at 3 scales)
+  3. Logs MIND loss (all 3 scales) + MI loss (for comparison) + NCC every epoch
   4. Saves best model checkpoint (lowest val loss)
   5. Saves training CSV for R3 visualisation
 
@@ -26,12 +26,13 @@ from pathlib import Path
 
 import torch
 import torch.optim as optim
+import torch.nn.functional as F
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.config           import MODELS, RESULTS, EPOCHS, LR, LAMBDA_SMOOTH
 from src.voxelmorph_model import VoxelMorph
-from src.losses           import total_loss
+from src.losses           import multiscale_total_loss, mutual_information_loss
 from src.dataloader       import get_dataloaders
 from src.metrics          import normalised_cross_correlation as ncc
 from src.utils            import get_logger
@@ -47,7 +48,7 @@ def get_device(requested: str = "auto") -> torch.device:
 
 def train_one_epoch(model, loader, optimizer, scaler, device, lambda_reg):
     model.train()
-    total = mi_sum = reg_sum = 0.0
+    total = mind_sum = mind_q_sum = mind_h_sum = reg_sum = 0.0
     n = 0
 
     for batch in loader:
@@ -56,8 +57,8 @@ def train_one_epoch(model, loader, optimizer, scaler, device, lambda_reg):
 
         optimizer.zero_grad()
         with torch.cuda.amp.autocast(enabled=scaler is not None):
-            warped_ct, dvf = model(mr, ct)
-            loss, losses   = total_loss(warped_ct, mr, dvf, lambda_reg)
+            warped_scales, dvf = model(mr, ct)
+            loss, losses       = multiscale_total_loss(warped_scales, mr, dvf, lambda_reg)
 
         if scaler is not None:
             scaler.scale(loss).backward()
@@ -67,48 +68,67 @@ def train_one_epoch(model, loader, optimizer, scaler, device, lambda_reg):
             loss.backward()
             optimizer.step()
 
-        total    += losses["total"]
-        mi_sum   += losses["mi"]
-        reg_sum  += losses["reg"]
-        n        += 1
+        total      += losses["total"]
+        mind_sum   += losses["mind"]
+        mind_q_sum += losses["mind_quarter"]
+        mind_h_sum += losses["mind_half"]
+        reg_sum    += losses["reg"]
+        n          += 1
 
     return {
-        "train_loss": total   / max(n, 1),
-        "train_mi":   mi_sum  / max(n, 1),
-        "train_reg":  reg_sum / max(n, 1),
+        "train_loss":         total      / max(n, 1),
+        "train_mind":         mind_sum   / max(n, 1),
+        "train_mind_quarter": mind_q_sum / max(n, 1),
+        "train_mind_half":    mind_h_sum / max(n, 1),
+        "train_reg":          reg_sum    / max(n, 1),
     }
 
 
 @torch.no_grad()
 def validate(model, loader, device, lambda_reg):
     model.eval()
-    total = mi_sum = reg_sum = ncc_sum = 0.0
+    total = mind_sum = mind_q_sum = mind_h_sum = mi_sum = reg_sum = ncc_sum = 0.0
     n = 0
 
     for batch in loader:
-        mr   = batch["mr"].to(device)
-        ct   = batch["ct"].to(device)
+        mr = batch["mr"].to(device)
+        ct = batch["ct"].to(device)
 
         with torch.cuda.amp.autocast():
-            warped_ct, dvf = model(mr, ct)
-            loss, losses   = total_loss(warped_ct, mr, dvf, lambda_reg)
+            warped_scales, dvf = model(mr, ct)
+            loss, losses       = multiscale_total_loss(warped_scales, mr, dvf, lambda_reg)
+
+        # The full-resolution warped CT is the last element
+        warped_full = warped_scales[-1]
+
+        # --- Also compute MI score for side-by-side comparison ---
+        with torch.cuda.amp.autocast(enabled=False):
+            mi_val = mutual_information_loss(
+                warped_full.float(), mr.float()
+            ).item()
 
         ncc_val = ncc(
             mr[0, 0].cpu().numpy(),
-            warped_ct[0, 0].cpu().numpy(),
+            warped_full[0, 0].cpu().numpy(),
         )
 
-        total   += losses["total"]
-        mi_sum  += losses["mi"]
-        reg_sum += losses["reg"]
-        ncc_sum += ncc_val
-        n       += 1
+        total      += losses["total"]
+        mind_sum   += losses["mind"]
+        mind_q_sum += losses["mind_quarter"]
+        mind_h_sum += losses["mind_half"]
+        mi_sum     += mi_val
+        reg_sum    += losses["reg"]
+        ncc_sum    += ncc_val
+        n          += 1
 
     return {
-        "val_loss": total   / max(n, 1),
-        "val_mi":   mi_sum  / max(n, 1),
-        "val_reg":  reg_sum / max(n, 1),
-        "val_ncc":  ncc_sum / max(n, 1),
+        "val_loss":         total      / max(n, 1),
+        "val_mind":         mind_sum   / max(n, 1),
+        "val_mind_quarter": mind_q_sum / max(n, 1),
+        "val_mind_half":    mind_h_sum / max(n, 1),
+        "val_mi":           mi_sum     / max(n, 1),
+        "val_reg":          reg_sum    / max(n, 1),
+        "val_ncc":          ncc_sum    / max(n, 1),
     }
 
 
@@ -208,8 +228,12 @@ def main():
     log_path  = str(RESULTS / "training_log.csv")
 
     # ── CSV log ──────────────────────────────────────────────────────────────
-    csv_fields   = ["epoch", "train_loss", "train_mi", "train_reg",
-                    "val_loss", "val_mi", "val_reg", "val_ncc", "lr"]
+    csv_fields   = [
+        "epoch", "train_loss", "train_mind", "train_mind_quarter",
+        "train_mind_half", "train_reg",
+        "val_loss", "val_mind", "val_mind_quarter", "val_mind_half",
+        "val_mi", "val_reg", "val_ncc", "lr",
+    ]
     write_header = not Path(log_path).exists()
     csv_file     = open(log_path, "a", newline="")
     writer       = csv.DictWriter(csv_file, fieldnames=csv_fields)
@@ -219,6 +243,7 @@ def main():
     # ── Training loop ─────────────────────────────────────────────────────────
     log.info(f"Training for {args.epochs} epochs")
     log.info(f"lambda_reg={args.lambda_reg}  lr={args.lr}")
+    log.info("Loss: Multi-Scale MIND (quarter=0.25x, half=0.5x, full=1.0x) + gradient regulariser")
 
     for epoch in range(start_epoch, start_epoch + args.epochs):
         t0         = time.time()
@@ -256,9 +281,12 @@ def main():
         print(
             f"Epoch {epoch:4d} | "
             f"train={train_logs['train_loss']:.6f} "
-            f"(mi={train_logs['train_mi']:.6f} "
+            f"(mind={train_logs['train_mind']:.6f} "
+            f"q={train_logs['train_mind_quarter']:.6f} "
+            f"h={train_logs['train_mind_half']:.6f} "
             f"reg={train_logs['train_reg']:.6f}) | "
-            f"val={val_logs['val_loss']:.6f}  "
+            f"mind_score={val_logs['val_mind']:.6f}  "
+            f"mi_score={val_logs['val_mi']:.6f}  "
             f"ncc={val_logs['val_ncc']:.4f} | "
             f"{elapsed:.1f}s"
         )
