@@ -124,8 +124,8 @@ class VoxelMorph(nn.Module):
 
         # Compute the three spatial sizes for SpatialTransformers
         D, H, W = vol_size
-        size_quarter = (D // 8, H // 8, W // 8)   # after 3 stride-2 encodes
-        size_half    = (D // 4, H // 4, W // 4)
+        size_quarter = (D // 4, H // 4, W // 4)   # quarter resolution (40x48x40)
+        size_half    = (D // 2, H // 2, W // 2)   # half resolution (80x96x80)
         size_full    = vol_size
 
         # Spatial transformers for each scale
