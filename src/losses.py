@@ -69,7 +69,6 @@ def jacobian_determinant_loss(dvf: torch.Tensor) -> torch.Tensor:
     jac_det = (1.0 + J_z) * (1.0 + J_y) * (1.0 + J_x)
     return F.relu(-jac_det).mean()
 
-
 def total_loss(
     warped_ct:       torch.Tensor,
     mr:              torch.Tensor,
