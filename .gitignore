@@ -38,3 +38,4 @@ source-files
 *.pdf
 docs/*.pdf
 scripts/generate_project_report_pdf.py
+test_data/

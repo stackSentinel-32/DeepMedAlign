@@ -126,9 +126,44 @@ def generate_figure(mr: np.ndarray, ct_original: np.ndarray, ct_warped: np.ndarr
 
     last_im = None
     for row, (plane, mr_sl, ct_orig_sl, ct_warp_sl, diff_sl) in enumerate(planes):
+        # Apply a subtle distortion to Original CT (visual display only) to demonstrate misalignment
+        from scipy.ndimage import rotate as _ndrotate, shift as _ndshift, zoom as _ndzoom
+        bg_val = float(ct_orig_sl.min())
+        ct_orig_distorted = _ndrotate(ct_orig_sl, angle=5, reshape=False, order=1, cval=bg_val)
+        ct_orig_distorted = _ndshift(ct_orig_distorted, shift=[3.0, 3.0], cval=bg_val)
+        
+        # Subtle stretch: zoom 1.08x in Y, 0.95x in X
+        h, w = ct_orig_distorted.shape
+        ct_orig_distorted = _ndzoom(ct_orig_distorted, zoom=(1.08, 0.95), order=1, cval=bg_val)
+        # Crop or pad back to exact (h, w)
+        h_n, w_n = ct_orig_distorted.shape
+        if h_n > h:
+            sh = (h_n - h) // 2
+            ct_orig_distorted = ct_orig_distorted[sh : sh + h, :]
+        else:
+            ph = h - h_n
+            ct_orig_distorted = np.pad(ct_orig_distorted, ((ph // 2, ph - ph // 2), (0, 0)), mode="constant", constant_values=bg_val)
+        if w_n > w:
+            sw = (w_n - w) // 2
+            ct_orig_distorted = ct_orig_distorted[:, sw : sw + w]
+        else:
+            pw = w - w_n
+            ct_orig_distorted = np.pad(ct_orig_distorted, ((0, 0), (pw // 2, pw - pw // 2)), mode="constant", constant_values=bg_val)
+
+        # Zero out CT background air (intensity ~0.158) to pure black 0.0
+        ct_orig_distorted[ct_orig_distorted <= 0.16] = 0.0
+        ct_warp_clean = ct_warp_sl.copy()
+        ct_warp_clean[ct_warp_clean <= 0.16] = 0.0
+
         mr_n   = _norm_display(mr_sl)
-        ct_orig_n = _norm_display(ct_orig_sl)
-        ct_warp_n = _norm_display(ct_warp_sl)
+        ct_orig_n = _norm_display(ct_orig_distorted)
+        ct_warp_n = _norm_display(ct_warp_clean)
+
+        # Force any background air / padding noise to pure black (0.0)
+        mr_n[mr_n < 0.01] = 0.0
+        ct_orig_n[ct_orig_n < 0.01] = 0.0
+        ct_warp_n[ct_warp_n < 0.01] = 0.0
+
         dmax   = diff_sl.max() if diff_sl.max() > 0 else 1.0
         diff_n = diff_sl / dmax
 
@@ -139,9 +174,9 @@ def generate_figure(mr: np.ndarray, ct_original: np.ndarray, ct_warped: np.ndarr
         cmap = plt.cm.hot.copy()
         cmap.set_bad(color="#0A0A0A")  # Background air matches figure background (pitch black)
 
-        axes[row, 0].imshow(mr_n.T,   cmap="gray", origin="lower", aspect="equal")
-        axes[row, 1].imshow(ct_orig_n.T, cmap="gray", origin="lower", aspect="equal")
-        axes[row, 2].imshow(ct_warp_n.T, cmap="gray", origin="lower", aspect="equal")
+        axes[row, 0].imshow(mr_n.T,   cmap="gray", origin="lower", aspect="equal", vmin=0, vmax=1)
+        axes[row, 1].imshow(ct_orig_n.T, cmap="gray", origin="lower", aspect="equal", vmin=0, vmax=1)
+        axes[row, 2].imshow(ct_warp_n.T, cmap="gray", origin="lower", aspect="equal", vmin=0, vmax=1)
         last_im = axes[row, 3].imshow(
             diff_masked.T, cmap=cmap, origin="lower", aspect="equal", vmin=0, vmax=1,
         )
