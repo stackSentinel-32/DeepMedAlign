@@ -96,13 +96,30 @@ Evaluated on **36 unseen test subjects** from the [SynthRad 2023](https://synthr
 
 ### 📸 Visual Results & Quality Control
 
-#### Anatomical Alignment (Patient 1BA116 — MRI vs Warped CT vs Difference Heatmap)
-![VoxelMorph v2 Registration Sample](results/figures/voxelmorph_diffmap.png)
+#### 🔬 Patient Case Studies (Fixed MRI vs Original CT vs Warped CT vs Difference Heatmaps)
 
-#### Registration Quality Control Dashboard
+##### Patient 1BA001
+![Patient 1BA001 Registration & Heatmap](results/figures/voxelmorph_diffmap_1BA001.png)
+
+##### Patient 1BA005
+![Patient 1BA005 Registration & Heatmap](results/figures/voxelmorph_diffmap_1BA005.png)
+
+##### Patient 1BA012
+![Patient 1BA012 Registration & Heatmap](results/figures/voxelmorph_diffmap_1BA012.png)
+
+##### Patient 1BA014
+![Patient 1BA014 Registration & Heatmap](results/figures/voxelmorph_diffmap_1BA014.png)
+
+##### Patient 1BA022
+![Patient 1BA022 Registration & Heatmap](results/figures/voxelmorph_diffmap_1BA022.png)
+
+#### 📊 Quantitative Methods Benchmark Comparison
+![Methods Comparison](results/figures/methods_comparison.png)
+
+#### 🎛️ Registration Quality Control Dashboard
 ![Registration Quality Dashboard](results/figures/qc_dashboard.png)
 
-#### VoxelMorph v2 Training Performance (134 Epochs)
+#### 📈 VoxelMorph v2 Training Performance (134 Epochs)
 ![Training Dashboard](results/figures/training_dashboard.png)
 
 ---
