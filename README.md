@@ -56,15 +56,18 @@ style G fill:#5a1a1a,color:#fff,stroke:#e05252
 
 ---
 
-## 🧠 VoxelMorph 3D Neural Architecture
+## 🧠 VoxelMorph 3D Neural Architecture & Feature Learning
 
-### 1. End-to-End Registration Pipeline Overview
-![DeepMedAlign 3D Registration Pipeline](results/figures/voxelmorph_pipeline_overview.png)
+### 1. 3D U-Net Feature Learning & Layer Abstraction
+![3D U-Net Feature Learning](results/figures/voxelmorph_feature_learning.png)
 
-### 2. 3D U-Net Architecture & Layer-by-Layer Feature Abstraction
-![VoxelMorph 3D U-Net Architecture](results/figures/voxelmorph_3d_unet_architecture.png)
+### 2. 3D Encoder Feature Extractor Comparison
+![3D Encoder Feature Extractor Comparison](results/figures/voxelmorph_feature_extractor_comparison.png)
 
-### 3. Technical Evolution: VoxelMorph v1 (Baseline) vs. VoxelMorph v2 (Proposed SOTA)
+### 3. 3D Decoder & Skip Feature Fusion Mechanism
+![3D Decoder & Skip Feature Fusion](results/figures/voxelmorph_decoder_skip_fusion.png)
+
+### 4. Technical Progression: VoxelMorph v1 (Baseline) vs. VoxelMorph v2 (Proposed SOTA)
 ![VoxelMorph v1 vs v2 Comparison](results/figures/voxelmorph_v1_vs_v2_comparison.png)
 
 ---
